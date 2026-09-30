@@ -3,12 +3,6 @@
 Checks the round trip rate against the theory of Syed et al. (2022) for
 N in {25, 50, 100, 200, 400} chains, 3 seeds each. Results go to
 ../results/chain_count_sweep.json.
-
-Same algorithm as the notebook, with two changes:
-  * log densities. At d=30, pi(x) underflows to 0.0 for beta below ~0.02, so
-    (pi(y)/pi(x))**beta becomes 0/0 = nan and min(1, nan) returns 1: the
-    hottest chains would accept every move.
-  * vectorised over chains, roughly 200x faster than a per-chain loop.
 """
 import numpy as np, time, json
 from pathlib import Path
