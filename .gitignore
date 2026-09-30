@@ -8,22 +8,3 @@ venv/
 
 # notebook output (curated runs live in figures/)
 output/
-
-# intermediate files from poster/code
-poster/code/traces.npz
-poster/code/res_*.json
-poster/code/fig_*.png
-
-# LaTeX build files
-*.aux
-*.bbl
-*.blg
-*.fdb_latexmk
-*.fls
-*.log
-*.out
-*.synctex.gz
-*.nav
-*.snm
-*.toc
-report/main.pdf

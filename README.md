@@ -1,6 +1,6 @@
 # Non-reversible parallel tempering on a bimodal target
 
-Code, results, poster and report from my URSS 2026 summer project at the
+Code and results from my URSS 2026 summer project at the
 University of Warwick, supervised by Prof. Krzysztof Łatuszyński.
 
 The project compares two ways of scheduling swaps in parallel tempering:
@@ -32,8 +32,6 @@ parallel_tempering.ipynb     main notebook (saved with outputs)
 scripts/chain_count_sweep.py stand-alone sweep over the number of chains
 results/                     numbers: sweep output, per-run diagnostics
 figures/                     selected notebook runs, one folder per dimension
-poster/                      poster PDF, LaTeX source and the code for its figures
-report/                      written report (LaTeX)
 ```
 
 ## Running it
@@ -52,9 +50,6 @@ about 3–4 minutes on a laptop. Figures from each run are written to
 python scripts/chain_count_sweep.py    # writes results/chain_count_sweep.json
 ```
 
-The poster figures have their own scripts, described in
-[poster/code/README.md](poster/code/README.md).
-
 Implementation notes:
 
 - The annealing path goes from a Gaussian reference at `beta = 0` to the target
@@ -63,7 +58,7 @@ Implementation notes:
   aiming for an acceptance rate of about 0.234.
 - Everything is computed in log space. An early version used raw densities.
   `pi(x)` underflowed to zero at moderate `d`, so the hot chains accepted every
-  move (see the poster code README).
+  move.
 - Replicate runs start in alternating modes, so R-hat across runs shows
   whether the cold chain actually mixes between modes.
 
@@ -124,14 +119,6 @@ reference.
 
 `results/early_runs.json` has diagnostics from the first round of notebook runs
 (25–26 Aug, truncated power path, `beta` in `[0.01, 1]`, fixed proposal radius).
-These are the numbers behind the tables and figures in `poster/section-drafts/`.
-
-## Poster and report
-
-- `poster/poster.pdf` is the final A1 poster; `poster/latex/` builds it
-  with `pdflatex poster.tex`.
-- `report/main.tex` is the write-up. Build it with
-  `latexmk -pdf main.tex`, or with `pdflatex` and `bibtex`.
 
 ## References
 
