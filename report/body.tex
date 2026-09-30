@@ -1,0 +1,918 @@
+\begin{abstract}
+Non-reversible parallel tempering replaces the random even--odd swap schedule of
+classical parallel tempering with a deterministic alternation, turning a
+replica's motion along the temperature ladder from a random walk into a
+ballistic one. \citet{syed2022} show that the resulting round trip rate is
+bounded away from zero as the ladder is refined, where the reversible rate decays
+like $1/N$, and give a theory of the annealing schedule built on a single
+quantity, the communication barrier $\Lambda$. We implement both schemes from
+scratch and test that theory on an equal-weight mixture of two Gaussians in
+$\R^d$ whose components have different widths, so that the two modes carry
+identical probability while tempering distorts them against one another.
+
+The predicted speed-up is real and quantitatively accurate: over a sixteen-fold
+sweep in the number of chains, $\hat\Lambda$ is invariant to within $5\,\%$, the
+non-reversible round trip rate rises to $93.8\,\%$ of its predicted ceiling
+$(2+2\Lambda)^{-1}$, and at $200$ chains the non-reversible scheme completes $21$
+round trips for every one the reversible scheme completes. Our main finding is
+that this says remarkably little about the samples. Holding the algorithm, the
+ladder, the dimension and the entire computational budget fixed and moving one
+shape parameter, the communication barrier changes by $4\,\%$ and the predicted
+round trip rate by $4\,\%$, while the recovered weight of one mode falls from
+$0.508$ to $0.042$. Judged by its own diagnostic the sampler is in identical
+health at both ends of that sweep. A Laplace argument explains why: tempering
+flattens the energy barrier between modes but not the volume asymmetry between
+them, and $\Lambda$ is assembled from swap acceptance rates, which are averages
+over states the chains have actually visited. We show further that a mode-aware
+statistic is not automatically safe either --- at $d=85$ six replicate chains
+report a mean mode occupancy of exactly the correct value, $0.500$, without one
+of them ever changing mode --- and we identify what does repair the failure: a
+genuine reference distribution at $\beta=0$ in place of a truncated power path.
+\end{abstract}
+
+\textbf{Keywords:} Markov chain Monte Carlo; parallel tempering;
+non-reversibility; multimodal sampling; communication barrier; convergence
+diagnostics.
+
+
+\section{Introduction}
+
+\subsection{Aims and objectives}
+
+The project set out to do three things.
+
+\begin{enumerate}
+  \item \textbf{Implement and verify.} Build both the reversible and the
+  non-reversible schemes of \citet{syed2022} from scratch and check their
+  quantitative predictions --- the $1/N$ decay of the reversible round trip rate,
+  the $N$-independent limit of the non-reversible one, and the invariance of the
+  communication barrier under refinement of the ladder --- on a target for which
+  every quantity of interest is available in closed form.
+
+  \item \textbf{Ask what the diagnostics measure.} The round trip rate is a
+  statement about the index process on the temperature ladder. The quantity a
+  practitioner cares about is whether the $\beta=1$ chain has visited both modes
+  in the right proportion. These are different statements, and the project's
+  central question is how tightly the first constrains the second.
+
+  \item \textbf{Locate the mechanism.} Where the two come apart, identify what is
+  responsible, separate genuine algorithmic limits from artefacts of tuning, and
+  say which design choices repair the failure.
+\end{enumerate}
+
+A fourth objective --- extending the torpid-mixing conditions of
+\citet{woodard2009torpid} from the reversible to the non-reversible setting ---
+was scoped but not completed; Section~\ref{sec:discussion} explains the
+obstruction and states the conjecture our numerics support.
+
+
+\section{Background}
+
+\subsection{Markov chain Monte Carlo}
+
+Let $\pi$ be a density on $\R^d$ known only up to a normalising constant. Markov
+chain Monte Carlo estimates $\E_\pi[f]$ by constructing a $\pi$-invariant kernel
+$P$, running the chain it defines, and appealing to the ergodic theorem:
+\begin{equation}
+  \frac1n\sum_{t=1}^n f(X_t)\;\longrightarrow\;\E_\pi[f]
+  \qquad\text{almost surely,}
+  \label{eq:ergodic}
+\end{equation}
+provided $P$ is $\pi$-irreducible and aperiodic. The standard construction is
+Metropolis--Hastings: propose $y\sim q(\cdot\mid x)$ and accept with probability
+\begin{equation}
+  \alpha(x,y)\;=\;1\wedge\frac{\pi(y)q(x\mid y)}{\pi(x)q(y\mid x)} ,
+  \label{eq:mh}
+\end{equation}
+which depends on $\pi$ only through ratios, so the normalising constant is never
+needed. Throughout this report the local proposal is an isotropic Gaussian random
+walk, for which $q$ is symmetric and \eqref{eq:mh} reduces to
+$1\wedge\pi(y)/\pi(x)$.
+
+Equation~\eqref{eq:ergodic} is an asymptotic statement and carries no rate. The
+entire practical difficulty of MCMC is that the constant hidden in it can be
+astronomically large, and the multimodal case is where this happens for reasons
+that can be made completely explicit.
+
+\subsection{Reversibility and detailed balance}
+
+A kernel is \emph{reversible} with respect to $\pi$ if
+\begin{equation}
+  \pi(\mathrm dx)P(x,\mathrm dy)\;=\;\pi(\mathrm dy)P(y,\mathrm dx),
+  \label{eq:db}
+\end{equation}
+that is, at stationarity the probability flux from $A$ to $B$ equals that from
+$B$ to $A$. Detailed balance implies invariance and is much easier to verify,
+which is why nearly every standard sampler is built to satisfy it.
+
+It is sufficient, not necessary, and it has a cost. A reversible chain is
+self-adjoint on $L^2(\pi)$ and its trajectories are statistically
+indistinguishable from their time reversals, so it cannot sustain a net drift.
+The consequence exploited in Section~\ref{sec:nrpt} is that to traverse a
+one-dimensional sequence of $N$ states a reversible chain must diffuse, taking
+$\Theta(N^2)$ steps, whereas a chain carrying an auxiliary direction can traverse
+it ballistically in $\Theta(N)$.
+
+\subsection{Multimodality and the failure of local samplers}
+
+Suppose $\pi$ concentrates on two well-separated regions $A$ and $B$ with a
+low-density region between them. A random walk Metropolis chain moves locally, so
+to travel from $A$ to $B$ it must either make one enormous proposal, which the
+proposal density makes vanishingly unlikely, or cross the gap in small steps each
+accepted with probability of order $\pi(y)/\pi(x)\ll 1$.
+
+The formal statement is via the conductance
+\begin{equation}
+  \Phi\;=\;\inf_{S:\ \pi(S)\le 1/2}
+   \frac{\int_S P(x,S^c)\,\pi(\mathrm dx)}{\pi(S)},
+  \label{eq:conductance}
+\end{equation}
+which by Cheeger-type inequalities bounds the spectral gap between $\Phi^2/2$ and
+$2\Phi$. Taking $S=A$ makes $\Phi$ exponentially small in the barrier height and
+hence, for product-form targets, in $d$. This is visible in every run reported
+below: the control single chain never once changes mode, returning a mode
+occupancy of exactly $0.00$ or $1.00$ against a truth of $0.500$, in every
+configuration we tested.
+
+\subsection{Tempering and the annealing path}
+
+Tempering attacks the barrier rather than the chain, by interpolating between an
+easy distribution and the target. The classical choice is the power path
+\begin{equation}
+  \pi_\beta(x)\;\propto\;\pi(x)^\beta,\qquad \beta\in(0,1],
+  \label{eq:powerpath}
+\end{equation}
+which flattens $\pi$ as $\beta$ falls, raising the trough between the modes and
+improving \eqref{eq:conductance}. \citet{syed2022} work with the more general
+\emph{annealing path}
+\begin{equation}
+  \pi_\beta(x)\;\propto\;\pi(x)^{\beta}\,\pi_0(x)^{1-\beta},
+  \label{eq:refpath}
+\end{equation}
+where $\pi_0$ is a normalised reference one can sample from directly. The
+distinction matters more than it appears. Under \eqref{eq:powerpath} the limit
+$\beta\to0$ is improper, so one truncates at some $\beta_{\min}>0$ and the
+hottest chain is still a flattened copy of the target --- with all of the
+target's asymmetries intact. Under \eqref{eq:refpath} the chain at $\beta=0$
+\emph{is} $\pi_0$, mixes by construction and supplies genuinely independent
+restarts. Section~\ref{sec:results-repair} shows this to be the single most
+consequential design choice in the study, and it is not a choice the theory of
+Section~\ref{sec:nrpt} makes for you.
+
+\subsection{Reversible parallel tempering}
+
+Parallel tempering discretises the path at
+\begin{equation}
+  \mathcal P_N:\quad 1=\beta_0>\beta_1>\dots>\beta_{N-1}=\beta_{\min}\ge0,
+\end{equation}
+and runs one chain per rung on $\R^{d\times N}$ with invariant density
+$\bigotimes_j\pi_{\beta_j}$. Chain $0$ targets $\pi$ and supplies the samples we
+keep; the rest exist to feed it mobility. We call chain $0$ the \emph{target}
+chain and chain $N-1$ the \emph{reference} chain.\footnote{Some diagnostic
+figures produced by our code index the ladder in the opposite direction, with $0$
+the reference; the axis labels state which convention is in force.}
+
+A \emph{scan} is two moves. In the \emph{exploration} move each chain
+independently performs $T$ random walk Metropolis steps against its own
+$\pi_{\beta_j}$; these are embarrassingly parallel. In the \emph{swap} move
+neighbouring chains exchange states, the pair $(j,j+1)$ being accepted with
+probability $1\wedge A_j$ where
+\begin{equation}
+  A_j=\frac{\pi_{\beta_j}(x_{j+1})\pi_{\beta_{j+1}}(x_j)}
+           {\pi_{\beta_j}(x_j)\pi_{\beta_{j+1}}(x_{j+1})}
+     =\exp\!\big\{(\beta_{j+1}-\beta_j)[\log\pi(x_j)-\log\pi(x_{j+1})]\big\},
+  \label{eq:swapratio}
+\end{equation}
+the second equality holding on the power path. Adjacent pairs overlap, so one
+swaps either the even-indexed pairs or the odd ones. In \emph{reversible}, or
+\emph{stochastic even--odd} (SEO), parallel tempering the parity is a fresh
+$\mathrm{Bernoulli}(1/2)$ draw each scan; the resulting kernel satisfies
+\eqref{eq:db}, and it is exactly this randomisation that makes a replica's
+position on the ladder a random walk.
+
+
+\section{Non-reversible parallel tempering}
+\label{sec:nrpt}
+
+\subsection{The deterministic even--odd swap scheme}
+
+The non-reversible scheme changes one line: at scan $i$, swap the even pairs if
+$i$ is even and the odd pairs if $i$ is odd. The ladder, the exploration kernel
+and the acceptance ratio \eqref{eq:swapratio} are untouched. We call this
+\emph{deterministic even--odd} (DEO).
+
+\begin{algorithm}[h]
+\caption{One parallel tempering scan. SEO and DEO differ only in line~6.}
+\label{alg:pt}
+\begin{algorithmic}[1]
+  \State \textbf{input:} ladder $\beta$, states $x_0,\dots,x_{N-1}$, scan index $i$
+  \For{$j=0,\dots,N-1$ \textbf{in parallel}}
+    \For{$t=1,\dots,T$}
+      \State $y\sim\mathcal N(x_j,\sigma_j^2 I)$
+      \State $x_j\leftarrow y$ with probability
+             $1\wedge\pi_{\beta_j}(y)/\pi_{\beta_j}(x_j)$
+    \EndFor
+  \EndFor
+  \State $p\leftarrow\mathrm{Bernoulli}(1/2)$ \ \textbf{(SEO)}
+         \qquad $p\leftarrow i\bmod 2$ \ \textbf{(DEO)}
+  \For{$j=p,\,p+2,\dots\le N-2$}
+    \State swap $x_j\leftrightarrow x_{j+1}$ with probability $1\wedge A_j$
+  \EndFor
+  \State record the chain index occupied by each replica
+\end{algorithmic}
+\end{algorithm}
+
+The parity is now a deterministic function of the scan counter, so the swap
+kernel no longer satisfies \eqref{eq:db}. Invariance of the product measure
+survives, because each individual swap remains a reversible move and invariance
+is closed under composition. What is gained is momentum: a replica just passed
+from chain $j$ to chain $j+1$ by an even sweep is offered the pair $(j+1,j+2)$ on
+the following odd sweep --- a move onward rather than a move back. With perfect
+swap acceptance a replica crosses the whole ladder in $N$ scans against
+$\Theta(N^2)$ for SEO.
+
+\subsection{Round trip rate}
+
+Let $\mathcal I_i^{\,r}$ denote the chain occupied by replica $r$ at the end of
+scan $i$; the vector process $\mathcal I_i$ is the \emph{index process}. A
+\emph{round trip} is a completed excursion of one replica from the target chain
+to the reference chain and back, and the \emph{round trip rate} is
+\begin{equation}
+  \tau=\lim_{n\to\infty}\frac{\E[T_n]}{n},
+  \label{eq:tau}
+\end{equation}
+$T_n$ being the number of round trips completed by all replicas in $n$ scans.
+It is the natural efficiency measure because each round trip delivers to the
+target chain one state that has travelled to the reference and back --- one
+approximately independent restart.
+
+It is worth being precise about what \eqref{eq:tau} is a statement about. It is a
+functional of $\mathcal I$, a process on $\{0,\dots,N-1\}$. It refers to the
+target $\pi$ only through the swap acceptance rates that drive $\mathcal I$. This
+observation is trivial as stated and is the pivot of the entire report.
+
+\begin{corollary}[\citealt{syed2022}, Corollary~1]
+\label{cor:syed1}
+For any annealing schedule $\mathcal P_N$,
+\begin{equation}
+  \tau_{\mathrm{SEO}}(\mathcal P_N)=\frac{1}{2N+2E(\mathcal P_N)},
+  \qquad
+  \tau_{\mathrm{DEO}}(\mathcal P_N)=\frac{1}{2+2E(\mathcal P_N)},
+  \label{eq:cor1}
+\end{equation}
+where the \emph{schedule inefficiency} is
+$E(\mathcal P_N)=\sum_{j=0}^{N-2} r_j/s_j$, with $s_j$ the swap acceptance rate
+for the pair $(j,j+1)$ and $r_j=1-s_j$.
+\end{corollary}
+
+The structural content is the placement of $N$: in the denominator for SEO, so
+refining the ladder costs and $\tau_{\mathrm{SEO}}\to0$ like $1/N$; absent for
+DEO, so refining is asymptotically free. This is the whole practical case for
+non-reversibility.
+
+\subsection{The communication barrier}
+
+The rejection rates are not free parameters. They aggregate into a quantity
+belonging to the path rather than to its discretisation.
+
+\begin{definition}[Communication barrier]
+\label{def:barrier}
+$\displaystyle \hat\Lambda(\mathcal P_N)=\sum_{j=0}^{N-2}r_j
+ =\sum_{j=0}^{N-2}(1-s_j)$.
+\end{definition}
+
+\citet{syed2022} show that as the mesh $\|\mathcal P_N\|\to0$,
+\begin{equation}
+  \hat\Lambda(\mathcal P_N)=\Lambda+O\!\big(N\|\mathcal P_N\|^3\big),
+  \qquad
+  \Lambda=\int_{\beta_{\min}}^{1}\lambda(\beta)\,\mathrm d\beta,
+  \label{eq:barrierlimit}
+\end{equation}
+with $\lambda$ the local communication barrier, an explicit functional of the
+path. So $\Lambda$ is invariant under refinement: adding chains changes each
+$r_j$ but not their sum. Since $E\ge\hat\Lambda$, with equality in the limit,
+\eqref{eq:cor1} gives
+
+\begin{theorem}[\citealt{syed2022}, Theorem~3]
+\label{thm:syed3}
+Along a sequence of refining schedules,
+$\tau_{\mathrm{SEO}}\to0$ and
+$\tau_{\mathrm{DEO}}\to\bar\tau=(2+2\Lambda)^{-1}$.
+\end{theorem}
+
+Because $\tau_{\mathrm{DEO}}$ rises towards $\bar\tau$ while the cost per scan
+grows linearly in $N$, round trips per unit of computation are maximised at a
+finite chain count, and \citet{syed2022} obtain $N^\ast\approx2\Lambda$. The
+optimal placement of rungs equalises the local barrier across pairs, which in
+practice means estimating $\lambda$ from a pilot run and inverting its cumulative
+integral.
+
+\subsection{What these quantities can and cannot see}
+\label{sec:whatcansee}
+
+It is worth stating plainly, before any experiment, what the theory of this
+section is a theory of.
+
+$\Lambda$, $E$ and $\tau$ are built from the swap acceptance rates $s_j$, and
+each $s_j$ is an expectation of \eqref{eq:swapratio} under the joint law of the
+two chains it connects. An expectation is taken over the states the chains have
+actually visited. If some region $A\subset\R^d$ is never reached by any chain on
+the ladder, no $s_j$ is affected by it, and therefore neither $\hat\Lambda$ nor
+$\hat\tau$ can report that anything is wrong. The diagnostics are estimated from
+the sampler's own trajectory, and a sampler cannot use its own trajectory to
+detect what its trajectory has omitted.
+
+None of this is a defect of \citet{syed2022}, whose results are stated for the
+index process and claim nothing about the geometry of $\pi$. It is a statement
+about how the results are used. A healthy round trip rate is necessary for good
+sampling; whether it is anywhere close to sufficient is an empirical question,
+and it is the question this report answers. The target of
+Section~\ref{sec:benchmark} is designed so that the answer is unambiguous: we can
+move the difficulty of the sampling problem through several orders of magnitude
+while holding $\Lambda$ fixed, and watch what the diagnostics do.
+
+
+\section{Methodology}
+
+\subsection{Implementation}
+
+Both schemes were implemented from scratch in Python with NumPy, vectorised
+across chains so that a scan is a handful of array operations rather than a loop
+over $N$. SEO and DEO share the entire code path and differ only in the line that
+sets the swap parity, so any difference between them is attributable to the
+schedule. For every configuration a control single-chain random walk Metropolis
+sampler runs at $\beta=1$ on the same total budget of density evaluations,
+supplying the ``no tempering'' baseline.
+
+\paragraph{Log-space evaluation.}
+All densities and acceptance ratios are computed in log space via log-sum-exp.
+This is a correctness requirement, not a refinement. Forming \eqref{eq:swapratio}
+from raw densities underflows at moderate $d$: at $d=30$ both $\pi(x)$ and
+$\pi(y)$ evaluate to exactly zero for $\beta\lesssim0.02$, the ratio becomes
+$0/0$, and the hottest $\sim\!15\,\%$ of the ladder silently accepts every
+proposal. An early version of our code had that bug, and its symptom --- swap
+rates of $1.000$ at the hot end together with a small $\hat\Lambda$ --- reads as
+success rather than as failure. It is worth flagging because it is a second
+instance of the report's theme: a diagnostic looking healthy for the wrong
+reason.
+
+\subsection{Benchmark targets}
+\label{sec:benchmark}
+
+The target throughout is an equal-weight mixture of two isotropic Gaussians with
+centres at $\pm\mathbf1_d$ and \emph{different} widths,
+\begin{equation}
+  \pi(x)=\tfrac12\,\mathcal N\!\big(x;+\mathbf1_d,\,s_1^2I\big)
+        +\tfrac12\,\mathcal N\!\big(x;-\mathbf1_d,\,s_2^2I\big),
+  \label{eq:target}
+\end{equation}
+with $A=\{x:x_1>c\}$ the basin of the $+\mathbf1_d$ mode, $c=1-2s_1/(s_1+s_2)$
+the variance-weighted midpoint, and $B$ its complement.
+
+This construction is the instrument of the whole report, and it was chosen for
+three properties. Both modes carry probability exactly $\tfrac12$, so the correct
+mode-$A$ occupancy is $0.500$ for every $d$, $s_1$ and $s_2$ --- the right answer
+never moves as we sweep. The separation is set by $d$. And the inhomogeneity is
+set by the single ratio $s_2/s_1$, so we can make the sampling problem
+arbitrarily hard \emph{without changing the answer and without changing anything
+the theory of Section~\ref{sec:nrpt} looks at}. Setting $s_1=s_2$ recovers the
+symmetric benchmark for which \citet{woodard2009rapid} prove rapid mixing, so a
+sweep in $s_2/s_1$ interpolates from a case known to be easy to one that
+\citet{woodard2009torpid} show is torpid.
+
+Why inhomogeneity should matter is visible from a Laplace approximation. On the
+power path \eqref{eq:powerpath}, near mode $i$ the tempered density
+$\pi^\beta$ is Gaussian with variance $s_i^2/\beta$ and total mass proportional
+to $(s_i^2)^{-d\beta/2}(s_i^2/\beta)^{d/2}$. The $\beta$ factors cancel in the
+ratio, leaving
+\begin{equation}
+  \boxed{\ \frac{\pi_\beta(A)}{\pi_\beta(B)}
+   =\left(\frac{s_1}{s_2}\right)^{d(1-\beta)}. \ }
+  \label{eq:laplace}
+\end{equation}
+The modes are balanced only at $\beta=1$, and the imbalance is exponential in
+$d(1-\beta)$. Tempering flattens the \emph{energy} barrier between the modes; it
+does nothing to the \emph{volume} asymmetry between them, and in fact makes it
+worse, monotonically, all the way up the ladder. At the $d=30$ benchmark with
+$s_1=0.3$, $s_2=0.4$ and $\beta_{\min}=0.01$, \eqref{eq:laplace} gives
+$1.9\times10^{-4}$: the reference chain --- the one chain free to move between
+modes --- is itself $5000$ to $1$ against mode $A$, so almost every replica that
+descends the ladder carries mode $B$ back down with it. Round trips are necessary
+for mode mixing; \eqref{eq:laplace} is the reason they are not sufficient. We
+write $D=d\lvert\log(s_2/s_1)\rvert$, in nats, for the resulting
+\emph{mode-weight distortion}.
+
+\subsection{Performance measures}
+
+Five quantities are recorded per run: the per-chain local acceptance rate,
+compared with the optimal $0.234$ of \citet{roberts1997}; the swap acceptance
+rates and the barrier $\hat\Lambda$ of Definition~\ref{def:barrier}, estimated
+separately under SEO and DEO as an internal consistency check; the round trip
+rate $\tau$ of \eqref{eq:tau}, compared with Corollary~\ref{cor:syed1} evaluated
+at the measured $s_j$; the \emph{mode-$A$ occupancy}, the proportion of retained
+$\beta=1$ samples in $A$, whose truth is $0.500$; and $\hat R$, the
+Gelman--Rubin statistic computed \emph{across replicate runs started alternately
+in the two modes}.
+
+The first three describe the ladder, the fourth describes the samples, and the
+fifth describes the agreement between independent samplers. The distance between
+the first three and the fourth is the subject of Section~\ref{sec:results-blind};
+the distance between the fourth and the fifth is the subject of
+Section~\ref{sec:results-repair}.
+
+\subsection{Experimental design}
+\label{sec:design}
+
+Two campaigns were run, differing in the annealing path, the proposal scaling
+and the replication.
+
+\paragraph{Campaign I: power path, fixed proposal radius.}
+Path \eqref{eq:powerpath}; $\beta$ geometric on $[0.01,1]$; proposal standard
+deviation $0.15/\sqrt\beta$, \emph{not} scaled with $d$; $50\,000$ scans of $64$
+exploration moves per chain; one run per configuration; every chain initialised
+at $x=-\mathbf1_d$, i.e.\ in mode $B$; no burn-in discarded. Three sweeps:
+\begin{enumerate}
+  \item[(I.a)] \emph{Chain count.} $d=30$, $s_1=0.3$, $s_2=0.4$,
+  $N\in\{25,50,100,200,400\}$.
+  \item[(I.b)] \emph{Dimension.} $N=60$, $s_1=0.3$, $s_2=0.4$,
+  $d\in\{5,10,20,40,80,160\}$.
+  \item[(I.c)] \emph{Inhomogeneity.} $d=25$, $N=65$, $s_1=0.20$ fixed,
+  $s_2\in\{0.14,0.15,0.16,0.18,0.20\}$.
+\end{enumerate}
+
+\paragraph{Campaign II: reference path, scaled proposals, replicated.}
+Path \eqref{eq:refpath} with an explicit reference $\pi_0$, so $\beta_0=0$ is a
+distribution one can sample directly; ladder
+$\{0\}\cup\mathrm{geomspace}(10^{-3},1)$ over $N=48$ chains, optionally retuned to
+equalise the local barrier; proposal standard deviation
+$2.38\,\sigma_{\mathrm{path}}(\beta)/\sqrt d$ after \citet{roberts1997}, with
+$\sigma_{\mathrm{path}}(\beta)^2=[(1-\beta)/\sigma_0^2+2\beta/(s_1^2+s_2^2)]^{-1}$
+the width of $\pi_\beta$; $s_1=0.2$, $s_2=0.3$; six replicate runs per
+configuration started alternately in the two modes, with $\hat R$ reported. Two
+references were used: an uninformative $\pi_0=\mathcal N(0,\sigma_0^2I)$ with
+$\sigma_0=1$, and a moment-matched mixture fitted to the target. The sweep was in
+dimension, $d\in\{15,20,25,30,35,45,50,75,85,100,200\}$.
+
+All runs used a single CPU core, with wall times of $100$--$780\,\mathrm{s}$ per
+configuration in Campaign~I and about $200$--$310\,\mathrm{s}$ in Campaign~II.
+
+
+\section{Results}
+\label{sec:results}
+
+\subsection{The speed-up is real}
+\label{sec:results-speedup}
+
+At the Campaign~I benchmark ($d=30$, $s_1=0.3$, $s_2=0.4$, $N=100$) the two
+schemes recover the same communication barrier to three significant figures,
+$\hat\Lambda=10.07$ under both, as Definition~\ref{def:barrier} requires: the
+barrier belongs to the path and the two schemes share a path. Their per-chain
+acceptance rates agree to $0.001$. Every difference between them is therefore
+attributable to the swap sequencing alone --- which is the point of implementing
+them on a shared code path.
+
+They differ exactly as Corollary~\ref{cor:syed1} predicts. The measured rates are
+$\tau_{\mathrm{SEO}}=3.7\times10^{-3}$ and
+$\tau_{\mathrm{DEO}}=38.4\times10^{-3}$, a factor of $10.4$ against a predicted
+$9.1$. The index process shows the mechanism directly: under DEO a replica sweeps
+the ladder end to end in roughly $N$ scans, while under SEO it diffuses near the
+cold end and reaches the reference chain only occasionally. Nothing in what
+follows is a challenge to this result. The non-reversible scheme does what
+\citet{syed2022} say it does, and does it accurately.
+
+\subsection{Scaling in the number of chains}
+\label{sec:results-chains}
+
+Table~\ref{tab:chains} reports sweep~(I.a): the target, the path and the budget
+are fixed, and only $N$ changes.
+
+\begin{table}[htbp]
+\centering
+\caption{Round trip rates against the number of chains. $d=30$, $s_1=0.3$,
+$s_2=0.4$, $50\,000$ scans, one run per row. ``Theory'' is
+Corollary~\ref{cor:syed1} at the measured swap rates. $^{\dagger}$censored: at
+$N=400$ SEO completed roughly $15$ round trips in the whole run, so
+$\hat\tau_{\mathrm{SEO}}$ and the speed-up derived from it are unreliable.}
+\label{tab:chains}
+\footnotesize
+\begin{tabular}{@{}rrrrrrrrr@{}}
+\toprule
+ & mean & \multicolumn{2}{c}{$\hat\Lambda$}
+ & \multicolumn{2}{c}{$\tau_{\mathrm{SEO}}\ (10^{-3})$}
+ & \multicolumn{2}{c}{$\tau_{\mathrm{DEO}}\ (10^{-3})$} & DEO \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
+$N$ & swap & SEO & DEO & theory & meas. & theory & meas. & over SEO \\
+\midrule
+ 25 & 0.602 &  9.53 &  9.54 & 12.6 & 11.7 & 29.7 & 26.0 & $2.2\times$ \\
+ 50 & 0.799 &  9.87 &  9.87 &  8.1 &  7.6 & 37.4 & 34.5 & $4.5\times$ \\
+100 & 0.898 & 10.07 & 10.07 &  4.5 &  3.7 & 41.0 & 38.4 & $10.4\times$ \\
+200 & 0.949 & 10.02 & 10.07 &  2.4 &  1.9 & 43.1 & 40.4 & $21.3\times$ \\
+400 & 0.975 &  9.95 & 10.04 &  1.2 & $0.3^{\dagger}$ & 44.2 & 42.5 & $142^{\dagger}\times$ \\
+\midrule
+\multicolumn{9}{@{}l@{}}{\footnotesize as $N\to\infty$: swap $\to1$,
+ $\hat\Lambda\to\Lambda$, $\tau_{\mathrm{SEO}}\to0$,
+ $\tau_{\mathrm{DEO}}\to\bar\tau=(2+2\Lambda)^{-1}=45.3\times10^{-3}$}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All three structural predictions hold. \textbf{The barrier is invariant in $N$}:
+across a sixteen-fold increase in the chain count $\hat\Lambda$ moves from
+$9.54$ to $10.04$, a spread of $5\,\%$, while the mean swap rate climbs from
+$0.602$ to $0.975$. The individual rejection rates fall by a factor of sixteen
+and their sum does not move --- the content of \eqref{eq:barrierlimit}, with the
+residual drift consistent with the $O(N\|\mathcal P_N\|^3)$ error.
+\textbf{$\tau_{\mathrm{SEO}}$ decays like $1/N$ while $\tau_{\mathrm{DEO}}$
+saturates}: taking $\Lambda\approx10.04$ gives $\bar\tau=45.3\times10^{-3}$, and
+the measured DEO rate climbs monotonically through $57$, $76$, $85$, $89$ and
+$94$ per cent of that ceiling while SEO falls by a factor of six between $N=25$ and $N=200$ --- slightly
+faster than $1/N$, because the schedule inefficiency $E$ falls from $15.8$ to
+$10.3$ as the ladder refines, so both terms in the denominator of
+\eqref{eq:cor1} move the same way.
+\textbf{Corollary~\ref{cor:syed1} is quantitatively accurate}: measured DEO rates
+are $87$--$96\,\%$ of prediction at every chain count, and SEO rates
+$79$--$94\,\%$ excluding the censored entry. The systematic shortfall has two
+identifiable sources --- the theory is stationary and $50\,000$ scans is finite,
+and the prediction assumes full equilibration between swaps whereas ours performs
+$64$ moves.
+
+The $N=400$ row should not be quoted as a $142\times$ speed-up: SEO completed
+about $15$ round trips in the entire run there, so its estimate is dominated by
+its own discretisation, and Corollary~\ref{cor:syed1} predicts $37\times$. The
+defensible headline is $N=200$: \textbf{DEO completes $21$ round trips for every
+one SEO completes}, against a predicted $18$.
+
+One qualification frames everything that follows. For this target
+$N^\ast\approx2\Lambda\approx20$, so every row of Table~\ref{tab:chains} sits at
+or beyond the compute-optimal chain count. The table measures the robustness of
+DEO to over-refinement --- the regime where its advantage is largest by
+construction --- rather than performance at a well-chosen $N$.
+
+\subsection{The diagnostic cannot see the difficulty}
+\label{sec:results-blind}
+
+The same five runs also report how often the target chain sits in mode $A$, whose
+true probability is $0.500$. Table~\ref{tab:occ} places the two alongside each
+other.
+
+\begin{table}[htbp]
+\centering
+\caption{Temperature mixing against sample quality, for the same five runs as
+Table~\ref{tab:chains}. The left block is monotone in $N$ and converges, as
+Theorem~\ref{thm:syed3} predicts. The right block does neither.}
+\label{tab:occ}
+\footnotesize
+\begin{tabular}{@{}rrrrrrr@{}}
+\toprule
+ & \multicolumn{2}{c}{temperature mixing}
+ & \multicolumn{4}{c}{mode-$A$ occupancy (truth $0.500$)} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-7}
+$N$ & $\tau_{\mathrm{DEO}}\ (10^{-3})$ & \% of $\bar\tau$
+ & SEO & DEO & single chain & DEO off by \\
+\midrule
+ 25 & 26.0 & 57\,\% & 0.002 & 0.002 & 0.006 & $250\times$ \\
+ 50 & 34.5 & 76\,\% & 0.002 & 0.002 & 0.006 & $250\times$ \\
+100 & 38.4 & 85\,\% & 0.287 & 0.236 & 0.009 & $2.1\times$ \\
+200 & 40.4 & 89\,\% & 0.106 & 0.165 & 0.007 & $3.0\times$ \\
+400 & 42.5 & 94\,\% & 0.002 & 0.095 & 0.009 & $5.3\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The temperature dynamics behave exactly as advertised: $\tau_{\mathrm{DEO}}$
+rises monotonically to $94\,\%$ of its ceiling. The mode weights do not follow.
+The DEO estimate is $0.236$ at $100$ chains, $0.095$ at $400$, and $0.002$ at
+both $25$ and $50$. It is not monotone in $N$, it does not converge, and at its
+best it is out by a factor of two. The single control chain never leaves the mode
+it started in.
+
+Sweep~(I.c) isolates the mechanism with a controlled experiment. Hold the
+algorithm, the ladder, the dimension, the chain count and the entire
+computational budget fixed, and move one number: $s_2$, from $s_1=0.20$ down to
+$0.14$. Both modes keep weight $\tfrac12$ throughout, so the right answer never
+moves.
+
+\begin{table}[htbp]
+\centering
+\caption{One knob, everything else fixed. $d=25$, $N=65$, $s_1=0.20$,
+$50\,000$ scans, $\beta$ geometric on $[0.01,1]$. Everything the theory looks at
+is flat; everything the sampler does collapses.}
+\label{tab:sigma}
+\footnotesize
+\begin{tabular}{@{}rrrrrrrr@{}}
+\toprule
+ & & \multicolumn{2}{c}{theory sees}
+ & \multicolumn{2}{c}{measured $\tau\ (10^{-3})$}
+ & \multicolumn{2}{c}{occupancy (truth $0.5$)} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
+$s_2$ & $s_2/s_1$ & $\hat\Lambda$ & $\tau_{\mathrm{DEO}}$
+ & SEO & DEO & SEO & DEO \\
+\midrule
+0.14 & 0.70 & 9.39 & 41.6 & 0.9 & 11.7 & 0.007 & 0.042 \\
+0.15 & 0.75 & 9.35 & 41.8 & 2.6 & 23.4 & 0.032 & 0.177 \\
+0.16 & 0.80 & 9.24 & 42.3 & 4.1 & 28.4 & 0.126 & 0.306 \\
+0.18 & 0.90 & 9.12 & 43.0 & 5.8 & 33.7 & 0.435 & 0.476 \\
+0.20 & 1.00 & 9.03 & 43.4 & 6.2 & 36.9 & 0.445 & 0.508 \\
+\midrule
+\multicolumn{8}{@{}l@{}}{\footnotesize across the series: $\hat\Lambda$
+ $+4.0\,\%$, predicted $\tau$ $-4.1\,\%$; measured $\tau_{\mathrm{DEO}}$
+ $-68\,\%$, $\tau_{\mathrm{SEO}}$ $-86\,\%$, occupancy $-92\,\%$}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This is the central result of the report. Everything the theory examines barely
+moves: $\hat\Lambda$ rises by $4.0\,\%$ and the predicted $\tau_{\mathrm{DEO}}$
+falls by $4.1\,\%$. What the sampler actually does collapses: measured
+$\tau_{\mathrm{DEO}}$ falls by $68\,\%$, $\tau_{\mathrm{SEO}}$ by $86\,\%$, and
+the mode-$A$ occupancy from $0.508$ to $0.042$, a factor of twelve. Judged by its
+own diagnostic --- a barrier of $9.0$ against $9.4$, a predicted round trip rate
+of $43.4$ against $41.6$ --- the sampler is in identical health at both ends of
+the sweep. \textbf{A healthy $\hat\Lambda$ and a healthy predicted round trip
+rate are not evidence that the sampler is exploring the target.}
+
+Section~\ref{sec:whatcansee} said why this must be possible: $\hat\Lambda$ is
+assembled from swap acceptance rates, which are averages over states the chains
+have visited, and it cannot see a mode the chains never reach. What sets the
+scale in this particular sweep is the truncation of the ladder at
+$\beta_{\min}=0.01$. On a power path the hottest chain is still a version of the
+target, with tempered standard deviation $s/\sqrt{\beta_{\min}}=10s$ per
+coordinate against a mode separation of $2$. At $s_2=0.20$ that is $2.0$ and the
+reference chain just merges the two basins; at $s_2=0.14$ it is $1.4$ and it does
+not, so the hottest chain is as bimodal as the coldest and no chain on the ladder
+can cross. This account is consistent with the ordering of all five runs but was
+not tested directly in this sweep; Section~\ref{sec:results-repair} reports the
+closely related experiment that does test it.
+
+\subsection{What dimension does}
+\label{sec:results-dim}
+
+Sweep~(I.b) raises $d$ with shape and chain count fixed.
+
+\begin{table}[htbp]
+\centering
+\caption{The effect of dimension. $N=60$, $s_1=0.3$, $s_2=0.4$, $50\,000$ scans,
+proposal radius fixed at $0.15$ and \emph{not} scaled with $d$.
+$^{\ddagger}$an independent repeat at $d=40$ gave $0.464$ for SEO.}
+\label{tab:dim}
+\footnotesize
+\begin{tabular}{@{}rrrrrrrrr@{}}
+\toprule
+ & mean & \multicolumn{2}{c}{barrier}
+ & \multicolumn{3}{c}{$\tau_{\mathrm{DEO}}\ (10^{-3})$}
+ & \multicolumn{2}{c}{occupancy (truth $0.5$)} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-7}\cmidrule(lr){8-9}
+$d$ & accept & $\hat\Lambda$ & $\hat\Lambda/\sqrt d$
+    & theory & meas. & ratio & SEO & DEO \\
+\midrule
+  5 & 0.676 &  3.90 & 1.74 & 96.6 & 94.7 & 0.98 & 0.494 & 0.494 \\
+ 10 & 0.554 &  5.77 & 1.82 & 67.6 & 61.7 & 0.91 & 0.469 & 0.490 \\
+ 20 & 0.406 &  8.26 & 1.85 & 47.1 & 41.6 & 0.88 & 0.419 & 0.519 \\
+ 40 & 0.243 & 11.42 & 1.81 & 33.0 & 28.1 & 0.85 & $0.002^{\ddagger}$ & 0.002 \\
+ 80 & 0.097 & 16.05 & 1.79 & 21.7 & 10.3 & 0.47 & 0.002 & 0.002 \\
+160 & 0.018 & 22.05 & 1.74 & 13.8 &  1.7 & 0.12 & 0.001 & 0.002 \\
+\midrule
+\multicolumn{9}{@{}l@{}}{\footnotesize least squares:
+$\hat\Lambda=1.81\,d^{\,0.497}$, residuals within $3.3\,\%$}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The barrier grows as $\hat\Lambda=1.81\,d^{0.497}$, a square-root law clean to
+$3.3\,\%$ across five doublings, so the chain count needed to keep the ladder
+connected grows only like $\sqrt d$. This is the encouraging half of the picture,
+and it is confirmed independently in Campaign~II
+(Table~\ref{tab:campaign2}), which gives $\hat\Lambda=2.02\,d^{0.474}$ on a
+different path with different mode widths.
+
+Corollary~\ref{cor:syed1} tracks the measured DEO rate to within $15\,\%$ up to
+$d=40$, and past that it does not. The reason is ours, not the theory's: a
+proposal radius fixed at $0.15$ does not scale with dimension, so the per-chain
+acceptance rate collapses from $0.676$ at $d=5$ to $0.018$ at $d=160$, far below
+the $0.234$ optimum. The chains stop equilibrating between swaps, which is
+precisely the assumption Corollary~\ref{cor:syed1} rests on. Mode recovery fails
+earlier still, between $d=20$ and $d=40$ --- exactly where
+$(s_1/s_2)^{d(1-\beta_{\min})}$ falls through $10^{-4}$, from
+$3.4\times10^{-3}$ at $d=20$ to $1.1\times10^{-5}$ at $d=40$. The two failures
+have different causes and different thresholds, and the ordering matters: the
+sample quality is already gone at $d=40$ while the round trip rate is still at
+$85\,\%$ of its predicted value.
+
+\subsection{What repairs it, and what does not}
+\label{sec:results-repair}
+
+Campaign~II repeats the dimension sweep with the two implementation weaknesses
+of Campaign~I removed: the path terminates at a genuine reference distribution
+rather than at $\beta_{\min}=0.01$, and the proposal is scaled optimally with
+$\beta$ and $d$.
+
+\begin{table}[htbp]
+\centering
+\caption{Campaign~II: reference path, optimally scaled proposals, $N=48$ chains,
+$20\,000$ scans $\times$ $16$ moves, six replicate runs per row started
+alternately in the two modes. $s_1=0.2$, $s_2=0.3$, moment-matched mixture
+reference, barrier-equalised ladder. $D=d\lvert\log(s_2/s_1)\rvert$ is the
+mode-weight distortion in nats.}
+\label{tab:campaign2}
+\footnotesize
+\begin{tabular}{@{}rrrrrrrrr@{}}
+\toprule
+$d$ & $D$ & $\hat\Lambda$ & $\hat\Lambda/\sqrt d$
+ & $\tau_{\mathrm{SEO}}$ & $\tau_{\mathrm{DEO}}$ & DEO over SEO
+ & occ.\ DEO & $\hat R_{\mathrm{DEO}}$ \\
+\midrule
+ 25 & 10.1 &  9.36 & 1.87 & 0.0069 & 0.0235 & $3.4\times$ & 0.508 & 1.00 \\
+ 30 & 12.2 &  9.99 & 1.82 & 0.0064 & 0.0197 & $3.1\times$ & 0.502 & 1.00 \\
+ 35 & 14.2 & 10.97 & 1.85 & 0.0056 & 0.0153 & $2.7\times$ & 0.503 & 1.00 \\
+ 45 & 18.2 & 12.22 & 1.82 & 0.0044 & 0.0105 & $2.4\times$ & 0.505 & 1.01 \\
+ 50 & 20.3 & 12.91 & 1.83 & 0.0041 & 0.0084 & $2.0\times$ & 0.520 & 1.01 \\
+ 75 & 30.4 & 15.66 & 1.81 & 0.0022 & 0.0037 & $1.7\times$ & 0.477 & 1.04 \\
+ 85 & 34.5 & 16.62 & 1.80 & 0.0019 & 0.0028 & $1.5\times$ & 0.384 & 1.05 \\
+100 & 40.5 & 17.88 & 1.79 & 0.0014 & 0.0019 & $1.4\times$ & 0.370 & 1.33 \\
+200 & 81.1 & 24.21 & 1.71 & 0.0002 & 0.0002 & $1.0\times$ & 0.500 & 94.87 \\
+\midrule
+\multicolumn{9}{@{}l@{}}{\footnotesize least squares over $d\le100$:
+ $\hat\Lambda=2.02\,d^{\,0.474}$, residuals within $1.4\,\%$}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The reference distribution is what repairs the occupancy.}
+Under the truncated power path, occupancy collapsed to $0.002$ somewhere between
+$d=20$ and $d=40$. With a genuine reference and a scaled proposal it is within
+$5\,\%$ of the truth at every $d$ up to $75$, where the distortion is $D=30.4$
+nats --- a regime in which \eqref{eq:laplace} on a power path would give a weight
+ratio of $6\times10^{-14}$. It degrades only at $d\ge85$, by $23\,\%$ there and
+$26\,\%$ at $d=100$. The reason is structural. On the path
+\eqref{eq:refpath} the distortion is non-monotone in $\beta$ and vanishes at
+\emph{both} endpoints, because $\beta=0$ is the reference and the reference does
+not distinguish the modes. Repeating the Laplace calculation on this path gives a
+worst-case weight ratio of $\exp(-0.307\,d)$ attained at an interior
+$\beta^\ast\approx0.13$ independent of $d$. The bottleneck moves from the top of
+the ladder to its middle, and a replica that reaches $\beta=0$ genuinely
+restarts. Section~\ref{sec:results-blind} is therefore a result about the power
+path with a truncated ladder, not about parallel tempering as such --- an
+important qualification, and one that strengthens rather than weakens the main
+point, because nothing in $\hat\Lambda$ or $\tau$ distinguished the two paths.
+
+\paragraph{A mode-aware statistic is not automatically safe either.}
+At $d=85$ with an uninformative $\mathcal N(0,I)$ reference, the six replicates
+report a mean mode-$A$ occupancy of exactly $0.500$ --- the correct answer to
+three decimal places --- while $\hat R=77$ for SEO and $110$ for DEO. The
+per-run marginals resolve it: the three runs started in mode $A$ report occupancy
+$1.00$, and the three started in mode $B$ report $0.00$. Not one of the six
+chains ever changed mode. The exactly correct answer is an artefact of averaging
+six maximally wrong ones, and the only statistic that caught it was $\hat R$
+across replicates deliberately started in different modes. The same configuration
+with a moment-matched mixture reference gives per-run occupancies of $0.61$ and
+$0.23$ under DEO with $\hat R=1.05$: a sampler that is genuinely mixing, whose
+diagnostics say so, and whose answer is correspondingly imperfect.
+
+\paragraph{Non-reversibility buys some sample quality, but far less than it buys
+round trips.} At $d=85$ DEO's per-run occupancies ($0.61$, $0.23$) straddle the
+truth more tightly than SEO's ($0.71$, $0.13$), and its $\hat R$ is lower
+($1.05$ against $1.19$). In Table~\ref{tab:occ}, at $N\ge100$ DEO is wrong by a factor of $2$--$5$ where
+SEO is wrong by up to $250$; at $N=25$ and $50$ neither scheme reaches mode $A$
+at all, so non-reversibility buys nothing there. So the non-reversible scheme is
+better on sample quality as well --- but by a factor of a few, in a setting where
+it is better on round trips by a factor of $21$. The two speed-ups are not the
+same number, and reporting the second in place of the first overstates the case
+by an order of magnitude.
+
+
+\section{Discussion}
+\label{sec:discussion}
+
+Two findings should be separated, because the second is easily mistaken for a
+criticism of the first.
+
+The first is a confirmation. On a target where every quantity is known in closed
+form, the theory of \citet{syed2022} predicts what a from-scratch implementation
+does: the communication barrier is invariant under refinement to $5\,\%$, the
+non-reversible round trip rate rises to $94\,\%$ of its predicted ceiling while
+the reversible rate decays like $1/N$, and Corollary~1 is accurate to
+$87$--$96\,\%$ wherever its hypotheses hold. The two departures are both traceable
+to hypotheses failing rather than conclusions failing --- a censored estimator at
+$N=400$, and a proposal radius that does not scale with $d$ above $d=40$ --- and
+both were removed in Campaign~II with the expected effect. The square-root growth
+of the barrier, reproduced on two different paths, is a genuinely encouraging
+result: the chain count required grows like $\sqrt d$, not like $d$.
+
+The second is that these quantities are a poor proxy for sample quality, and the
+gap is not small. Table~\ref{tab:sigma} is the cleanest statement of it: across a
+series in which the sampler goes from recovering the mode weights to missing them
+by a factor of twelve, $\hat\Lambda$ moves by $4\,\%$ and the predicted round trip
+rate by $4\,\%$. This is not a flaw in \citet{syed2022}, whose results are stated
+for the index process and claim nothing about the geometry of $\pi$. It is a
+statement about inference from diagnostics. $\Lambda$, $E$ and $\tau$ are
+estimated from swap acceptance rates, which are averages over states the chains
+have visited, and no such statistic can report on a region the sampler has never
+reached. Tempering removes the energy barrier between modes; it does not remove
+the volume asymmetry \eqref{eq:laplace} that starves the ladder of one of them.
+
+Section~\ref{sec:results-repair} sharpens this in two directions at once. The
+failure is not intrinsic to parallel tempering --- replacing a truncated power
+path by a genuine reference distribution recovers correct occupancies out to
+$d=75$ at a distortion of $30$ nats --- but the diagnostics did not distinguish
+the working design from the broken one. And a target-referring statistic is not
+sufficient on its own: the $d=85$ run in which six chains report a mean occupancy
+of exactly $0.500$ without one of them ever changing mode is a case where the
+sample-quality statistic was exactly right for exactly the wrong reason. The
+practical recommendation is therefore a three-layer one: report $\tau$ and
+$\hat\Lambda$ to diagnose the ladder, an occupancy or other target-referring
+statistic to diagnose the samples, and a cross-replicate $\hat R$ from
+deliberately dispersed starting points to diagnose the occupancy.
+
+\paragraph{Relation to the torpid mixing literature.}
+\citet{woodard2009rapid} give sufficient conditions for rapid mixing of parallel
+and simulated tempering on multimodal targets, and \citet{woodard2009torpid}
+sufficient conditions for torpid mixing. The relevant contrast is that the
+rapid-mixing results apply when the target is symmetric with respect to the
+partition into modes, while torpid mixing can be forced by letting the modes
+differ in shape --- precisely the $s_1\ne s_2$ construction of
+\eqref{eq:target}. Their mechanism, a set whose persistence across temperatures
+decays exponentially, is the measure-theoretic form of what \eqref{eq:laplace}
+computes here, and our results are consistent with theirs: occupancy fails in
+exactly the configurations where the distortion $D$ is large and the path does
+not remove it.
+
+Extending those conditions to the non-reversible case was an objective of this
+project and was not achieved. The obstruction is structural rather than
+technical: the Woodard--Schmidler--Huber bounds are spectral, and their
+decomposition argument uses reversibility twice --- once to make the swapping
+chain self-adjoint so that the spectral gap controls the mixing time, and once in
+the state decomposition itself. A DEO chain is not self-adjoint and its spectral
+gap does not directly control its mixing time, so the statement must be
+reformulated before it can be proved. What the numerics establish is that the
+answer is unlikely to be qualitatively different. In every configuration where
+SEO fails to recover the mode weights, DEO fails too --- sometimes by a smaller
+factor (two to five) and sometimes just as badly; non-reversibility accelerates the index
+process, and the index process is not what is broken. The natural conjecture is
+that the torpid-mixing conditions carry over with the $O(N^2)$ ladder-traversal
+factor replaced by $O(N)$ and the exponential-in-$d$ factor untouched ---
+consistent with the whole thrust of this report, in which non-reversibility
+improves the ladder dynamics by a large constant and leaves the geometry of $\pi$
+exactly where it found it. Establishing it would most plausibly go through the
+piecewise-deterministic Markov process limit of \citet{syed2022} rather than
+through a spectral argument.
+
+\paragraph{Limitations.}
+\emph{(i)} Campaign~I used one run per configuration. The round trip rate is
+stable under replication --- two independent $d=40$ runs agree to $2.5\,\%$
+($0.0288$ against $0.0281$) --- but the occupancy is not: those same two runs give
+$0.464$ and $0.002$ under SEO. Mode-weight estimates there are dominated by rare
+events and a single $50\,000$-scan run cannot pin them down, which is why
+Campaign~II replicates six times and reports $\hat R$. \emph{(ii)} No burn-in is
+discarded and every Campaign~I chain starts in mode $B$, so occupancy is biased
+towards $B$ by construction; the $d\le20$ runs return $0.42$--$0.52$, showing the
+bias is small when the sampler mixes, but it inflates the apparent failure in the
+slow runs. \emph{(iii)} Sweep~(I.c) is at $d=25$ with $65$ chains, not at the
+$d=30$ benchmark, so it should be read within itself. \emph{(iv)} The benchmark is
+a two-component Gaussian mixture with isotropic components, chosen for
+tractability; nothing here establishes that the conclusions transfer to curved or
+strongly anisotropic modes.
+
+
+\section{Conclusion}
+
+\textbf{Non-reversibility buys an order of magnitude and more.} With the target
+fixed at $d=30$, the DEO round trip rate rose to $93.8\,\%$ of its $N\to\infty$
+ceiling $\bar\tau=(2+2\Lambda)^{-1}$ while the SEO rate fell like $1/N$; at $200$
+chains DEO completed $21$ round trips for every one SEO completed, against a
+predicted $18$.
+
+\textbf{The theory is accurate wherever its assumptions hold.} Measured rates sat
+at $87$--$96\,\%$ of Corollary~1 for every chain count and for every $d\le40$.
+The two gaps that appear are both explained: SEO at $400$ chains is censored by
+the run length, and above $d=40$ a proposal radius that does not scale with
+dimension breaks the local-exploration assumption before the theory breaks.
+
+\textbf{The communication barrier scales like $\sqrt d$.} Two campaigns with
+different annealing paths, mode widths and chain counts give
+$\hat\Lambda=1.81\,d^{0.497}$ and $\hat\Lambda=2.02\,d^{0.474}$, each clean to a
+few percent, so the chain count needed to keep the ladder connected grows only
+like $\sqrt d$.
+
+\textbf{Round trip rate is not a diagnostic of sample quality.} In every failing
+run the barrier, the swap rates and the predicted round trip rate all looked
+healthy while the mode weights were wrong by factors of two to $250$. In the
+controlled sweep of Table~\ref{tab:sigma}, $\hat\Lambda$ moved by $4\,\%$ and the
+predicted $\tau$ by $4\,\%$ while the recovered mode weight fell by $92\,\%$.
+Tempering removes the energy barrier between modes; it does not remove the volume
+asymmetry $(s_1/s_2)^{d(1-\beta)}$ that starves the ladder of one of them, and
+$\tau$ is blind to the difference.
+
+\textbf{Nor is an occupancy, on its own.} At $d=85$ six replicate chains reported
+a mean mode occupancy of exactly $0.500$ --- the correct answer --- without one of
+them ever changing mode, and only a cross-replicate $\hat R$ from dispersed
+starts revealed it. Report all three layers: $\tau$ and $\hat\Lambda$ for the
+ladder, a target-referring statistic for the samples, and $\hat R$ for the
+target-referring statistic.
+
+\textbf{Next.} Choose $\beta_{\min}$ and the reference distribution from the
+target rather than fixing them --- most of what looks like algorithmic failure at
+moderate $d$ turns out to be a failure of path design that the theory is not
+intended to catch --- and formalise the extension of the torpid-mixing conditions
+of \citet{woodard2009torpid} to the non-reversible case, for which the evidence
+here gives a clear conjecture and the piecewise-deterministic limit of
+\citet{syed2022} the most likely route.

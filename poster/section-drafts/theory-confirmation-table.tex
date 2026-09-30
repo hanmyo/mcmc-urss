@@ -1,0 +1,43 @@
+% Chain-count sweep vs. the round trip theory of Syed et al. (needs booktabs, xcolor)
+
+\providecommand{\tabSEO}{}\providecommand{\tabDEO}{}
+\definecolor{tabSEOc}{HTML}{3B5BDB}   % SEO blue, matches the figures
+\definecolor{tabDEOc}{HTML}{E8590C}   % DEO orange, matches the figures
+\definecolor{tabMuted}{HTML}{535A61}
+
+{\centering
+\footnotesize
+\renewcommand{\arraystretch}{1.18}
+\begin{tabular}{@{}
+  r                                 % N
+  @{\hspace{9pt}}r r                % Lambda-hat: SEO, DEO
+  @{\hspace{9pt}}r                  % E
+  @{\hspace{10pt}}r                 % tau_SEO theory
+  @{\hspace{7pt}}r@{$\,\pm\,$}l     % tau_SEO measured
+  @{\hspace{10pt}}r                 % tau_DEO theory
+  @{\hspace{7pt}}r@{$\,\pm\,$}l     % tau_DEO measured
+  @{}}
+\toprule
+ & \multicolumn{2}{c}{$\hat\Lambda$} & &
+   \multicolumn{3}{c}{\textcolor{tabSEOc}{$\tau_{\mathrm{SEO}}$}
+     {\color{tabMuted}$(10^{-3})$}} &
+   \multicolumn{3}{c}{\textcolor{tabDEOc}{$\tau_{\mathrm{DEO}}$}
+     {\color{tabMuted}$(10^{-3})$}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){5-7}\cmidrule(lr){8-10}
+$N$ & \textcolor{tabSEOc}{SEO} & \textcolor{tabDEOc}{DEO} & $E$ &
+  {\color{tabMuted}theory} & \multicolumn{2}{c}{measured} &
+  {\color{tabMuted}theory} & \multicolumn{2}{c}{measured} \\
+\midrule
+ 25 &  9.63 &  9.56 & 16.04 & {\color{tabMuted}12.18} &  5.73 & 0.24 & {\color{tabMuted}29.3} &  8.98 & 0.37 \\
+ 50 &  9.86 &  9.87 & 12.35 & {\color{tabMuted} 8.02} &  5.65 & 0.19 & {\color{tabMuted}37.5} & 15.98 & 0.13 \\
+100 &  9.93 & 10.06 & 11.13 & {\color{tabMuted} 4.50} &  3.27 & 0.08 & {\color{tabMuted}41.2} & 22.20 & 0.66 \\
+200 &  9.94 &  9.97 & 10.48 & {\color{tabMuted} 2.38} &  0.87 & 0.09 & {\color{tabMuted}43.6} & 30.43 & 0.57 \\
+400 &  9.98 & 10.00 & 10.25 & {\color{tabMuted} 1.22} &
+  \multicolumn{2}{r}{$<0.1^{\dagger}$} & {\color{tabMuted}44.5} & 33.68 & 0.23 \\
+\midrule
+{\color{tabMuted}$\infty$} & \multicolumn{2}{c}{\color{tabMuted}$\Lambda$} &
+  {\color{tabMuted}$\to\Lambda$} &
+  \multicolumn{3}{c}{\color{tabMuted}$\to 0$} &
+  \multicolumn{3}{c}{\color{tabMuted}$\to\bar\tau = 1/(2+2\Lambda) = 45.4$} \\
+\bottomrule
+\end{tabular}\par}

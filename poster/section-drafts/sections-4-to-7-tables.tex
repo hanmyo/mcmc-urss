@@ -1,0 +1,171 @@
+% Poster tables for sections 4-7, taken from the early notebook runs
+% (numbers in results/early_runs.json). All runs: 50,000 scans x 64 moves,
+% proposal radius 0.15, beta geometric on [0.01, 1], chains started at x = -1.
+% Needs booktabs and xcolor.
+
+
+% --- Section 4: Round trip rate against the number of chains
+% Chain-count sweep.  d = 30, sigma1 = 0.3, sigma2 = 0.4, 50 000 scans.
+\providecommand{\tabSEO}{}\providecommand{\tabDEO}{}
+\definecolor{tabSEOc}{HTML}{3B5BDB}   % SEO blue, matches the figures
+\definecolor{tabDEOc}{HTML}{E8590C}   % DEO orange, matches the figures
+\definecolor{tabMuted}{HTML}{535A61}
+
+{\centering
+\footnotesize
+\renewcommand{\arraystretch}{1.18}
+\begin{tabular}{@{}
+  r                                 % N
+  @{\hspace{9pt}}r                  % mean swap rate
+  @{\hspace{9pt}}r r                % Lambda-hat: SEO, DEO
+  @{\hspace{10pt}}r r               % tau_SEO theory, measured
+  @{\hspace{10pt}}r r               % tau_DEO theory, measured
+  @{\hspace{9pt}}r                 % speed-up
+  @{}}
+\toprule
+ & mean & \multicolumn{2}{c}{$\hat\Lambda$} &
+   \multicolumn{2}{c}{\textcolor{tabSEOc}{$\tau_{\mathrm{SEO}}$}
+     {\color{tabMuted}$(10^{-3})$}} &
+   \multicolumn{2}{c}{\textcolor{tabDEOc}{$\tau_{\mathrm{DEO}}$}
+     {\color{tabMuted}$(10^{-3})$}} & DEO \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
+$N$ & swap & \textcolor{tabSEOc}{SEO} & \textcolor{tabDEOc}{DEO} &
+  {\color{tabMuted}theory} & meas. &
+  {\color{tabMuted}theory} & meas. & over SEO \\
+\midrule
+ 25 & 0.602 &  9.53 &  9.54 & {\color{tabMuted}12.6} & 11.7 & {\color{tabMuted}29.7} & 26.0 & 2.2$\times$ \\
+ 50 & 0.799 &  9.87 &  9.87 & {\color{tabMuted} 8.1} &  7.6 & {\color{tabMuted}37.4} & 34.5 & 4.5$\times$ \\
+100 & 0.898 & 10.07 & 10.07 & {\color{tabMuted} 4.5} &  3.7 & {\color{tabMuted}41.0} & 38.4 & 10.4$\times$ \\
+200 & 0.949 & 10.02 & 10.07 & {\color{tabMuted} 2.4} &  1.9 & {\color{tabMuted}43.1} & 40.4 & 21.3$\times$ \\
+400 & 0.975 &  9.95 & 10.04 & {\color{tabMuted} 1.2} &  0.3$^{\dagger}$ & {\color{tabMuted}44.2} & 42.5 & 142$^{\dagger}\times$ \\
+\midrule
+\multicolumn{9}{@{}l@{}}{\color{tabMuted}\scriptsize
+  as $N\to\infty$:\ \ swap $\to 1$,\ \ $\hat\Lambda\to\Lambda$,\ \
+  $\tau_{\mathrm{SEO}}\to 0$,\ \
+  $\tau_{\mathrm{DEO}}\to\bar\tau = 1/(2+2\Lambda) = 45.3\times10^{-3}$} \\
+\bottomrule
+\end{tabular}\par}
+
+
+% --- Section 5: Round trips are not mode mixing
+% Same five runs as section 4.  d = 30, sigma1 = 0.3, sigma2 = 0.4.
+\providecommand{\tabSEO}{}\providecommand{\tabDEO}{}
+\definecolor{tabSEOc}{HTML}{3B5BDB}
+\definecolor{tabDEOc}{HTML}{E8590C}
+\definecolor{tabCTLc}{HTML}{2F9E44}
+\definecolor{tabTRUEc}{HTML}{C92A2A}
+\definecolor{tabMuted}{HTML}{535A61}
+
+{\centering
+\footnotesize
+\renewcommand{\arraystretch}{1.18}
+\begin{tabular}{@{}
+  r                                 % N
+  @{\hspace{11pt}}r                 % tau_DEO
+  @{\hspace{9pt}}r                  % % of tau-bar
+  @{\hspace{16pt}}r                 % occ SEO
+  @{\hspace{11pt}}r                 % occ DEO
+  @{\hspace{11pt}}r                 % occ single chain
+  @{\hspace{13pt}}r                 % DEO error factor
+  @{}}
+\toprule
+ & \multicolumn{2}{c}{temperature mixing} &
+   \multicolumn{4}{c}{mode-A occupancy \ \ {\color{tabTRUEc}(truth 0.500)}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-7}
+$N$ & \textcolor{tabDEOc}{$\tau_{\mathrm{DEO}}$}
+      {\color{tabMuted}$(10^{-3})$} & {\color{tabMuted}\% of $\bar\tau$} &
+  \textcolor{tabSEOc}{SEO} & \textcolor{tabDEOc}{DEO} &
+  \textcolor{tabCTLc}{single} & DEO off by \\
+\midrule
+ 25 & 26.0 & {\color{tabMuted}57\,\%} & 0.002 & 0.002 & 0.006 & $250\times$ \\
+ 50 & 34.5 & {\color{tabMuted}76\,\%} & 0.002 & 0.002 & 0.006 & $250\times$ \\
+100 & 38.4 & {\color{tabMuted}85\,\%} & 0.287 & 0.236 & 0.009 & $2.1\times$ \\
+200 & 40.4 & {\color{tabMuted}89\,\%} & 0.106 & 0.165 & 0.007 & $3.0\times$ \\
+400 & 42.5 & {\color{tabMuted}94\,\%} & 0.002 & 0.095 & 0.009 & $5.3\times$ \\
+\midrule
+\multicolumn{3}{@{}l}{\color{tabMuted}monotone in $N$, as predicted} &
+\multicolumn{4}{r@{}}{\color{tabMuted}not monotone, not converging} \\
+\bottomrule
+\end{tabular}\par}
+
+
+% --- Section 6: What dimension does to the barrier
+% 60 chains throughout, sigma1 = 0.3, sigma2 = 0.4, 50 000 scans.
+\definecolor{tabSEOc}{HTML}{3B5BDB}
+\definecolor{tabDEOc}{HTML}{E8590C}
+\definecolor{tabTRUEc}{HTML}{C92A2A}
+\definecolor{tabMuted}{HTML}{535A61}
+
+{\centering
+\footnotesize
+\renewcommand{\arraystretch}{1.18}
+\begin{tabular}{@{}
+  r                                 % d
+  @{\hspace{9pt}}r                  % acceptance
+  @{\hspace{11pt}}r r               % Lambda-hat, Lambda-hat/sqrt(d)
+  @{\hspace{11pt}}r r r             % tau_DEO theory, measured, ratio
+  @{\hspace{12pt}}r r               % occupancy SEO, DEO
+  @{}}
+\toprule
+ & mean & \multicolumn{2}{c}{barrier} &
+   \multicolumn{3}{c}{\textcolor{tabDEOc}{$\tau_{\mathrm{DEO}}$}
+     {\color{tabMuted}$(10^{-3})$}} &
+   \multicolumn{2}{c}{occ. {\color{tabTRUEc}(truth 0.5)}} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-7}\cmidrule(lr){8-9}
+$d$ & accept & $\hat\Lambda$ & $\hat\Lambda/\sqrt{d}$ &
+  {\color{tabMuted}theory} & meas. & {\color{tabMuted}ratio} &
+  \textcolor{tabSEOc}{SEO} & \textcolor{tabDEOc}{DEO} \\
+\midrule
+  5 & 0.676 &  3.90 & 1.74 & {\color{tabMuted}96.6} & 94.7 & {\color{tabMuted}0.98} & 0.494 & 0.494 \\
+ 10 & 0.554 &  5.77 & 1.82 & {\color{tabMuted}67.6} & 61.7 & {\color{tabMuted}0.91} & 0.469 & 0.490 \\
+ 20 & 0.406 &  8.26 & 1.85 & {\color{tabMuted}47.1} & 41.6 & {\color{tabMuted}0.88} & 0.419 & 0.519 \\
+ 40 & 0.243 & 11.42 & 1.81 & {\color{tabMuted}33.0} & 28.1 & {\color{tabMuted}0.85} & 0.002$^{\ddagger}$ & 0.002 \\
+ 80 & 0.097 & 16.05 & 1.79 & {\color{tabMuted}21.7} & 10.3 & {\color{tabMuted}0.47} & 0.002 & 0.002 \\
+160 & 0.018 & 22.05 & 1.74 & {\color{tabMuted}13.8} &  1.7 & {\color{tabMuted}0.12} & 0.001 & 0.002 \\
+\midrule
+\multicolumn{9}{@{}l@{}}{\color{tabMuted}\scriptsize
+  least squares: $\hat\Lambda = 1.81\,d^{\,0.497}$\hspace{16pt}
+  $^{\ddagger}$an independent repeat at $d = 40$ gave 0.464} \\
+\bottomrule
+\end{tabular}\par}
+
+
+% --- Section 7: Controlled test: one knob only
+% d = 25, 65 chains, sigma1 = 0.20 fixed, 50 000 scans, beta in [0.01,1].
+\definecolor{tabSEOc}{HTML}{3B5BDB}
+\definecolor{tabDEOc}{HTML}{E8590C}
+\definecolor{tabTRUEc}{HTML}{C92A2A}
+\definecolor{tabMuted}{HTML}{535A61}
+
+{\centering
+\footnotesize
+\renewcommand{\arraystretch}{1.18}
+\begin{tabular}{@{}
+  r                                 % sigma2
+  @{\hspace{9pt}}r                  % sigma2/sigma1
+  @{\hspace{12pt}}r                 % Lambda-hat
+  @{\hspace{11pt}}r                 % tau theory
+  @{\hspace{12pt}}r r               % tau SEO, DEO measured
+  @{\hspace{11pt}}r r               % occupancy
+  @{}}
+\toprule
+ & & \multicolumn{2}{c}{theory sees} &
+   \multicolumn{2}{c}{measured $\tau$ {\color{tabMuted}$(10^{-3})$}} &
+   \multicolumn{2}{c}{occ. {\color{tabTRUEc}(truth 0.5)}} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}
+$\sigma_2$ & $\sigma_2/\sigma_1$ & $\hat\Lambda$ &
+  {\color{tabMuted}$\tau_{\mathrm{DEO}}$} &
+  \textcolor{tabSEOc}{SEO} & \textcolor{tabDEOc}{DEO} &
+  \textcolor{tabSEOc}{SEO} & \textcolor{tabDEOc}{DEO} \\
+\midrule
+0.14 & 0.70 & 9.39 & {\color{tabMuted}41.6} & 0.9 & 11.7 & 0.007 & 0.042 \\
+0.15 & 0.75 & 9.35 & {\color{tabMuted}41.8} & 2.6 & 23.4 & 0.032 & 0.177 \\
+0.16 & 0.80 & 9.24 & {\color{tabMuted}42.3} & 4.1 & 28.4 & 0.126 & 0.306 \\
+0.18 & 0.90 & 9.12 & {\color{tabMuted}43.0} & 5.8 & 33.7 & 0.435 & 0.476 \\
+0.20 & 1.00 & 9.03 & {\color{tabMuted}43.4} & 6.2 & 36.9 & 0.445 & 0.508 \\
+\midrule
+\multicolumn{8}{@{}l@{}}{\color{tabMuted}\scriptsize
+  across the series: $\hat\Lambda$ $+4\,\%$, predicted $\tau$ $-4\,\%$;\hspace{10pt}
+  measured $\tau$ $-68\,\%$, occupancy $-92\,\%$} \\
+\bottomrule
+\end{tabular}\par}
